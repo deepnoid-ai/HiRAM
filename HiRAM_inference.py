@@ -34,9 +34,6 @@ from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 from nnunetv2.utilities.utils import create_lists_from_splitted_dataset_folder
 
 import sys, os
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# project_root = os.path.abspath(os.path.join(current_dir, "..", "..", "nnunetv2"))
-# sys.path.insert(0, project_root)
 from nnunetv2.utilities.get_network_from_plans import get_network_from_plans_withSAM
 
 

@@ -20,6 +20,7 @@ class MaskDecoder_HiRAM(nn.Module):
         embedding_dim: int,
         sam_embedding_dim: list,
         cnn_embedding_dim: list,
+        cnn_in_channels: int,
         transformer_args: dict,
         num_multimask_outputs: int = 3,
         activation: Type[nn.Module] = nn.GELU,
@@ -53,7 +54,7 @@ class MaskDecoder_HiRAM(nn.Module):
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, embedding_dim * 2)
         
         self.cnn_fusion = nn.Sequential(
-            nn.Conv2d(992, cnn_embedding_dim[0] * 2, kernel_size=3, padding=1),
+            nn.Conv2d(cnn_in_channels, cnn_embedding_dim[0] * 2, kernel_size=3, padding=1),
             LayerNorm2d(cnn_embedding_dim[0] * 2),
             activation(),
             nn.Conv2d(cnn_embedding_dim[0] * 2, cnn_embedding_dim[0], kernel_size=3, padding=1),
@@ -149,7 +150,7 @@ class MaskDecoder_HiRAM(nn.Module):
         # Run the Decoder block
         tokens_pe_1 = tokens_pe_2 = tokens
         cnn_embeddings = self.cnn_fusion(cnn_embeddings)
-        tokens_1, sam_1, cnn_1, region_masks_1 = self.stage_1(image_embeddings, cnn_embeddings, tokens, tokens_pe_1)
+        tokens_1, sam_1, cnn_1, region_masks_1 = self.stage_1(src, cnn_embeddings, tokens, tokens_pe_1)
         tokens_2, sam_2, cnn_2, region_masks_2 = self.stage_2(sam_1, cnn_1, tokens_1, tokens_pe_2)
         
         hs = self.tokens_mlp(tokens_2[:, 0:1, :])
@@ -157,7 +158,7 @@ class MaskDecoder_HiRAM(nn.Module):
         hs_cnn = hs[:, :, hs.shape[-1]//2:]
         masks_sam = (hs_sam @ sam_2.view(b, -1, 256 * 256)).view(b, -1, 256, 256)
         masks_cnn = (hs_cnn @ cnn_2.view(b, -1, 256 * 256)).view(b, -1, 256, 256)
-        masks = masks_sam*0.5 + masks_cnn*0.5
+        masks = masks_sam + masks_cnn
 
         return masks, [region_masks_1, region_masks_2]
 

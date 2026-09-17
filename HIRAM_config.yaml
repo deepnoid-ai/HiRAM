@@ -1,7 +1,7 @@
 setup:
   configuration: 2d
   dataset_id: your_dataset_id
-  fold: 50
+  fold: 0
   file_name: your_run_name
   initial_lr: 1e-4
   batch_size: 4

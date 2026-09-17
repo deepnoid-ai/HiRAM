@@ -34,10 +34,10 @@ from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 from nnunetv2.utilities.utils import create_lists_from_splitted_dataset_folder
 
 import sys, os
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, "..", "..", "nnunetv2"))
-sys.path.insert(0, project_root)
-from utilities.get_network_from_plans import get_network_from_plans_withSAM
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# project_root = os.path.abspath(os.path.join(current_dir, "..", "..", "nnunetv2"))
+# sys.path.insert(0, project_root)
+from nnunetv2.utilities.get_network_from_plans import get_network_from_plans_withSAM
 
 
 class nnUNetPredictor(object):
@@ -79,17 +79,15 @@ class nnUNetPredictor(object):
         self.config_path = config_path
 
 
-    def initialize_from_trained_model_folder(self, model_training_output_dir: str,
+    def initialize_from_trained_model_folder(self, model_training_output_dir: str, fold: int,
                                              checkpoint_name: str = 'checkpoint_final.pth'):
-        """
-        This is used when making predictions with a trained model
-        """
         dataset_json = load_json(join(model_training_output_dir, 'dataset.json'))
         plans = load_json(join(model_training_output_dir, 'plans.json'))
         plans_manager = PlansManager(plans)
 
         parameters, patch_sizes = [], []
-        checkpoint = torch.load(join(model_training_output_dir, checkpoint_name), map_location=torch.device('cpu'), weights_only=False)
+        checkpoint = torch.load(join(model_training_output_dir, f'fold_{fold}', checkpoint_name),
+                                map_location=torch.device('cpu'), weights_only=False)
         trainer_name = checkpoint['trainer_name']
         configuration_name = checkpoint['init_args']['configuration']
         inference_allowed_mirroring_axes = checkpoint['inference_allowed_mirroring_axes'] if \
@@ -264,10 +262,9 @@ class nnUNetPredictor(object):
                     sleep(0.1)
                     proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
 
-                nnUNet_logits, SAM_logits, prediction = self.predict_logits_from_preprocessed_data(data, base_name=os.path.basename(ofile))
+                nnUNet_logits, prediction = self.predict_logits_from_preprocessed_data(data, base_name=os.path.basename(ofile))
                 prediction = prediction.cpu()
                 nnUNet_logits = nnUNet_logits.cpu()
-                SAM_logits = None
 
                 if ofile is not None:
                     # this needs to go into background processes
@@ -277,7 +274,7 @@ class nnUNetPredictor(object):
                             export_prediction_from_logits,
                             ((prediction, properties, self.configuration_manager, self.plans_manager,
                               self.dataset_json, ofile,
-                              self.withSAM, nnUNet_logits, SAM_logits),)
+                              self.withSAM, nnUNet_logits),)
                         )
                     )
                 else:
@@ -288,7 +285,7 @@ class nnUNetPredictor(object):
                                 (prediction, self.plans_manager,
                                  self.configuration_manager, self.label_manager,
                                  properties,
-                                 self.withSAM, nnUNet_logits, SAM_logits),)
+                                 self.withSAM, nnUNet_logits),)
                         )
                     )
                 if ofile is not None:
@@ -333,27 +330,25 @@ class nnUNetPredictor(object):
             # this actually saves computation time
             if self.ensemble_method == 'average':
                 if prediction is None:
-                    nnUNet_logits, SAM_logits, prediction = self.predict_sliding_window_return_logits(data, patch_size)
+                    nnUNet_logits, prediction = self.predict_sliding_window_return_logits(data, patch_size)
                     nnUNet_logits = nnUNet_logits.to('cpu')
                     prediction = prediction.to('cpu')
-                    SAM_logits = SAM_logits.to('cpu')
                 else:
-                    nnUNet_logits, SAM_logits, prediction = self.predict_sliding_window_return_logits(data, patch_size)
+                    nnUNet_logits, prediction = self.predict_sliding_window_return_logits(data, patch_size)
                     nnUNet_logits += nnUNet_logits.to('cpu')
                     prediction += prediction.to('cpu')
-                    SAM_logits += SAM_logits.to('cpu')
-            
+
             elif self.ensemble_method == 'max':
-                nnUNet_logits, SAM_logits, pred = self.predict_sliding_window_return_logits(data, patch_size)
+                nnUNet_logits, pred = self.predict_sliding_window_return_logits(data, patch_size)
                 all_predictions.append(pred)
-        
+
         if len(self.list_of_parameters) > 1:
             if self.ensemble_method == 'average':
                 prediction /= len(self.list_of_parameters)
 
         if self.verbose: print('Prediction done')
         torch.set_num_threads(n_threads)
-        return nnUNet_logits, SAM_logits, prediction
+        return nnUNet_logits, prediction
 
     def _internal_get_sliding_window_slicers(self, image_size: Tuple[int, ...], patch_size):
         slicers = []
@@ -394,7 +389,6 @@ class nnUNetPredictor(object):
         with torch.no_grad():
             if self.withSAM:
                 nnUNet_out, _, prediction, _ = self.network(x)
-                SAM_out = None
             else:
                 prediction = self.network(x)
                 nnUNet_out = None
@@ -409,9 +403,13 @@ class nnUNetPredictor(object):
                 c for i in range(len(mirror_axes)) for c in itertools.combinations(mirror_axes, i + 1)
             ]
             for axes in axes_combinations:
-                prediction += torch.flip(self.network(torch.flip(x, axes)), axes)
+                if self.withSAM:
+                    _, _, flipped_prediction, _ = self.network(torch.flip(x, axes))
+                else:
+                    flipped_prediction = self.network(torch.flip(x, axes))
+                prediction += torch.flip(flipped_prediction, axes)
             prediction /= (len(axes_combinations) + 1)
-        return nnUNet_out, SAM_out, prediction
+        return nnUNet_out, prediction
 
     def _internal_predict_sliding_window_return_logits(self,
                                                        data: torch.Tensor,
@@ -438,8 +436,6 @@ class nnUNetPredictor(object):
                                                dtype=torch.half, device=results_device)
                 nnUNet_logits = torch.zeros((self.label_manager.num_segmentation_heads, *data.shape[1:]),
                                              dtype=torch.half, device=results_device)
-                SAM_logits = torch.zeros((1, *data.shape[1:]),
-                                               dtype=torch.half, device=results_device)
             else:
                 predicted_logits = torch.zeros((self.label_manager.num_segmentation_heads, *data.shape[1:]),
                                                dtype=torch.half, device=results_device)
@@ -458,10 +454,7 @@ class nnUNetPredictor(object):
                 workon = data[sl][None]
                 workon = workon.to(self.device)
 
-                nnUNet_out, SAM_out, prediction = self._internal_maybe_mirror_and_predict(workon)
-                nnUNet_out = nnUNet_out[0].to(results_device)
-                if SAM_out is not None:
-                    SAM_out = SAM_out[0].to(results_device)
+                nnUNet_out, prediction = self._internal_maybe_mirror_and_predict(workon)
                 prediction = prediction[0].to(results_device)
 
                 if self.use_gaussian:
@@ -470,19 +463,14 @@ class nnUNetPredictor(object):
                 n_predictions[sl[1:]] += gaussian
 
                 if self.withSAM:
+                    nnUNet_out = nnUNet_out[0].to(results_device)
                     if self.use_gaussian:
                         nnUNet_out *= gaussian
-                        if SAM_out is not None:
-                            SAM_out *= gaussian
                     nnUNet_logits[sl] += nnUNet_out.squeeze()
-                    if SAM_out is not None:
-                        SAM_logits[sl] += SAM_out.squeeze()
 
             predicted_logits /= n_predictions
             if self.withSAM:
                 nnUNet_logits /= n_predictions
-                if SAM_out is not None:
-                    SAM_logits /= n_predictions
             else:
                 nnUNet_logits = None
 
@@ -491,7 +479,7 @@ class nnUNetPredictor(object):
             empty_cache(self.device)
             empty_cache(results_device)
             raise e
-        return nnUNet_logits, SAM_logits, predicted_logits
+        return nnUNet_logits, predicted_logits
 
     @torch.inference_mode()
     def predict_sliding_window_return_logits(self, input_image: torch.Tensor, patch_size) \
@@ -527,15 +515,15 @@ class nnUNetPredictor(object):
             if self.perform_everything_on_device and self.device != 'cpu':
                 # we need to try except here because we can run OOM in which case we need to fall back to CPU as a results device
                 try:
-                    nnUNet_logits, SAM_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size,
+                    nnUNet_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size,
                                                                                            self.perform_everything_on_device)
                 except RuntimeError:
                     print(
                         'Prediction on device was unsuccessful, probably due to a lack of memory. Moving results arrays to CPU')
                     empty_cache(self.device)
-                    nnUNet_logits, SAM_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size, False)
+                    nnUNet_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size, False)
             else:
-                nnUNet_logits, SAM_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size,
+                nnUNet_logits, predicted_logits = self._internal_predict_sliding_window_return_logits(data, slicers, patch_size,
                                                                                        self.perform_everything_on_device)
 
             empty_cache(self.device)
@@ -544,16 +532,17 @@ class nnUNetPredictor(object):
             if self.withSAM:
                 nnUNet_logits = nnUNet_logits[(slice(None), *slicer_revert_padding[1:])]
 
-        return nnUNet_logits, SAM_logits, predicted_logits
+        return nnUNet_logits, predicted_logits
 
 
 
 if __name__ == '__main__':
     config_path = './HIRAM_config.yaml'
-    checkpoint_save_path = 'your_checkpoint_path'
     input_path = 'your_input_path'
     output_path = 'your_output_path'
-    
+    checkpoint_save_path = 'your_checkpoint_path'
+    fold = 0
+
     sam_conf = {
         "model_type": "HiRAM",
         "model_name": "LoRA",
@@ -580,6 +569,7 @@ if __name__ == '__main__':
 
     predictor.initialize_from_trained_model_folder(
         checkpoint_save_path,
+        fold,
         checkpoint_name="checkpoint_best.pth",
     )
 

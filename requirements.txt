@@ -1,0 +1,25 @@
+# Python 3.9
+# torch/torchvision built with CUDA 12.4 in the dev environment.
+# If you need the matching CUDA wheels, install with:
+#   pip install torch==2.4.1 torchvision==0.19.1 --extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.4.1
+torchvision==0.19.1
+numpy==2.0.2
+acvl_utils==0.2
+dynamic_network_architectures==0.3.1
+batchgenerators==0.25
+batchgeneratorsv2>=0.2.1
+mamba-ssm==2.3.0
+einops==0.7.0
+matplotlib==3.9.4
+nibabel==5.2.1
+pandas==2.3.3
+PyYAML==6.0.1
+requests==2.32.2
+scikit-image==0.24.0
+scikit-learn==1.6.1
+scipy==1.13.1
+seaborn==0.13.2
+SimpleITK==2.5.6
+tifffile==2024.5.22
+tqdm==4.67.1

@@ -19,13 +19,14 @@ def build_sam_vit_b(checkpoint=None):
         checkpoint=checkpoint,
     )
 
-def build_HiRAM(checkpoint=None):
+def build_HiRAM(checkpoint=None, cnn_in_channels=992):
     return _build_HiRAM(
         encoder_embed_dim=768,
         encoder_depth=12,
         encoder_num_heads=12,
         encoder_global_attn_indexes=[2, 5, 8, 11],
         checkpoint=checkpoint,
+        cnn_in_channels=cnn_in_channels,
     )
     
 sam_model_registry = {
@@ -94,6 +95,7 @@ def _build_HiRAM(
         encoder_num_heads,
         encoder_global_attn_indexes,
         checkpoint=None,
+        cnn_in_channels=992,
 ):
     prompt_embed_dim = 256
     image_size = 1024
@@ -125,6 +127,7 @@ def _build_HiRAM(
             embedding_dim=prompt_embed_dim,
             sam_embedding_dim = [256, 64, 32],
             cnn_embedding_dim = [256, 64, 32],
+            cnn_in_channels=cnn_in_channels,
             transformer_args=dict(
                 mlp_dim=2048,
                 num_heads=8,

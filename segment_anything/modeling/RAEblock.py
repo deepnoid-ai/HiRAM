@@ -68,8 +68,7 @@ class RAEblock(nn.Module):
         
         self.pe_layer_sam = PositionEmbeddingRandom(sam_embedding_dim // 2)
         self.pe_layer_cnn = PositionEmbeddingRandom(cnn_embedding_dim // 2)
-        self.sam_feat_proj = nn.Conv2d(256, sam_embedding_dim, kernel_size=1)
-        
+
     def forward(
         self,
         sam_embedding: Tensor,

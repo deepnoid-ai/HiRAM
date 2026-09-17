@@ -150,7 +150,7 @@ class BinarizeSTE(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output
+        return grad_output, None
 
 
 class PlainConvUNet_withSAM(nn.Module):
@@ -198,7 +198,12 @@ class PlainConvUNet_withSAM(nn.Module):
         self.decoder = UNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision, nonlin_first=nonlin_first)
     
         if SAM_config:
-            self.SAM = sam_model_registry[SAM_config['model_type']]()
+            # matches the channel-wise concat of nnUNet_skips[:-1] done in forward()
+            cnn_in_channels = sum(self.encoder.output_channels[:-1])
+            if SAM_config['model_type'] == 'HiRAM':
+                self.SAM = sam_model_registry[SAM_config['model_type']](cnn_in_channels=cnn_in_channels)
+            else:
+                self.SAM = sam_model_registry[SAM_config['model_type']]()
 
             for module_name in ['image_encoder', 'prompt_encoder', 'mask_decoder']:
                 update_flag = SAM_config["Update"].get(module_name, False)    
@@ -249,7 +254,16 @@ class PlainConvUNet_withSAM(nn.Module):
         SAM_output = self.SAM(SAM_inputs, multimask_output=False)
         SAM_outs = torch.stack([out["low_res_logits"].sum(dim=0, keepdim=True) if out["low_res_logits"].shape[0] > 1 else out["low_res_logits"] 
                                 for out in SAM_output], dim=0).squeeze(1)
-        region_masks = torch.stack([out["low_regions_logprobs"] for out in SAM_output], dim=0)
+        per_image_region_masks = [out["low_regions_logprobs"] for out in SAM_output]
+        if per_image_region_masks[0] is None:
+            region_masks = None
+        else:
+            num_stages = len(per_image_region_masks[0])
+            num_branches = len(per_image_region_masks[0][0])
+            region_masks = [
+                [torch.cat([img[l][b] for img in per_image_region_masks], dim=0) for b in range(num_branches)]
+                for l in range(num_stages)
+            ]
         
         return nnUNet_outs, nnUNet_mask, SAM_outs, region_masks
 

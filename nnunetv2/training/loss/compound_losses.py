@@ -107,33 +107,41 @@ class DC_and_BCE_loss(nn.Module):
 
 
 class RegionLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, boundary_width=2):
         super(RegionLoss, self).__init__()
+        self.boundary_width = boundary_width
 
-    def forward(self, pred, target):
-        if pred is None:
-            return torch.tensor(0.0)
-        
-        B, N, _, H, W = pred.shape
-        
-        target_int, target_bound, target_bg = self.build_region_gt(target.squeeze(1))
-        target_class = torch.stack([target_bg, target_bound, target_int], dim=1)
-        target_class = target_class.unsqueeze(1).expand(-1, N, -1, -1, -1)
-        
-        pred_fg = pred[:, :, 1:3]
-        target_fg = target_class[:, :, 1:3]
-        valid_mask = target_fg.sum(dim=2) > 0
-        
-        kl = F.kl_div(pred_fg, target_fg, reduction="none").sum(dim=2)
-        loss = (kl * valid_mask).sum() / (valid_mask.sum() + 1e-8)
+    def forward(self, region_masks, target):
+        if region_masks is None:
+            return torch.tensor(0.0, device=target.device)
+
+        gt_interior, gt_boundary, _ = self.build_region_gt(target.squeeze(1), self.boundary_width)
+
+        loss = 0.0
+        for stage in region_masks:
+            for pred in stage:
+                Hl, Wl = pred.shape[-2:]
+                gt_int_l = F.interpolate(gt_interior.unsqueeze(1), size=(Hl, Wl),
+                                          mode="bilinear", align_corners=False).squeeze(1)
+                gt_bnd_l = F.interpolate(gt_boundary.unsqueeze(1), size=(Hl, Wl),
+                                          mode="bilinear", align_corners=False).squeeze(1)
+
+                loss = loss + self._region_kl(pred[:, 1], gt_bnd_l)   # boundary channel
+                loss = loss + self._region_kl(pred[:, 2], gt_int_l)   # interior channel
 
         return loss
-    
-    def build_region_gt(self, gt_mask, boundary_width=2):
+
+    @staticmethod
+    def _region_kl(pred_log, target_soft):
+        kl = F.kl_div(pred_log, target_soft, reduction="none")
+        return kl.sum() / (target_soft.sum() + 1e-8)
+
+    @staticmethod
+    def build_region_gt(gt_mask, boundary_width=2):
         """
-        gt_mask: (B,H,W), binary {0,1}
+        gt_mask: (B,H,W), binary {0,1}, at full resolution.
         return:
-            gt_int, gt_bnd, gt_bg: (B,H,W)
+            gt_int, gt_bnd, gt_bg: (B,H,W), at full resolution.
         """
         gt_mask = gt_mask.float()
 

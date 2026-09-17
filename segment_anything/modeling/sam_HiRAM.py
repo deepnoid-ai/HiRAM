@@ -74,7 +74,6 @@ class SAMwithHiRAM(nn.Module):
             post_region_masks = self.postprocess_region_masks(
                 region_masks,
                 input_size=image_record["image"].shape[-2:],
-                original_size=image_record["original_size"],
             )
             bin_masks = masks > self.mask_threshold
             outputs.append(
@@ -123,24 +122,21 @@ class SAMwithHiRAM(nn.Module):
         self,
         region_masks: torch.Tensor,
         input_size: Tuple[int, ...],
-        original_size: Tuple[int, ...],
     ) -> torch.Tensor:
-        
+
         if region_masks[0][0] is None:
             return None
 
-        flat_masks = []
+        processed = []
         for stage in region_masks:
+            stage_out = []
             for mask in stage:
-                
-                mask = F.interpolate(mask, (self.image_encoder.img_size, self.image_encoder.img_size),
-                                        mode="bilinear", align_corners=False)
-                mask = mask[..., : input_size[0], : input_size[1]]
-                mask = F.interpolate(mask, original_size, mode="bilinear", align_corners=False)
-                
-                flat_masks.append(mask)
-        region_masks = torch.stack(flat_masks, dim=1).squeeze(0)
-        return region_masks
+                Hl, Wl = mask.shape[-2:]
+                crop_h = max(1, round(Hl * input_size[0] / self.image_encoder.img_size))
+                crop_w = max(1, round(Wl * input_size[1] / self.image_encoder.img_size))
+                stage_out.append(mask[..., :crop_h, :crop_w])
+            processed.append(stage_out)
+        return processed
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""

@@ -55,7 +55,7 @@ class MUG(nn.Module):
         self.in_proj = nn.Linear(d_model, self.d_inner * 2)
         self.act = nn.SiLU()
         
-        self.priorgenerate = RPG(d_model, d_state)
+        self.prior_generate = RPG(d_model, d_state)
         
         self.ssm_bg   = SSM(d_model, d_state=d_state, d_conv=d_conv, ssm_ratio=ssm_ratio)
         self.ssm_bd   = SSM(d_model, d_state=d_state, d_conv=d_conv, ssm_ratio=ssm_ratio)
@@ -90,7 +90,7 @@ class MUG(nn.Module):
         B, C, H, W = x.shape
         
         # index & prior generation
-        priors, index, region_mask = self.priorgenerate(hidden_states)
+        priors, index, region_mask = self.prior_generate(hidden_states)
         [prior_bg, prior_bd, prior_in] = priors
         [idx_bg, idx_bd, idx_in] = index
         
